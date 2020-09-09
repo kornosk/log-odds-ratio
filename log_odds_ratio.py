@@ -131,14 +131,24 @@ class LogOddsRatio:
         """ The usage difference for word w among two corpora i and j
         """
         self.delta = dict()
-        n_i = len(self.y_i)
-        n_j = len(self.y_j)
-        alpha_zero = len(self.alpha)
+        n_i = sum(self.y_i.values())
+        n_j = sum(self.y_j.values())
+        alpha_zero = sum(self.alpha.values())
+        logger.debug(f"Size of corpus-i: {n_i}")
+        logger.debug(f"Size of corpus-j: {n_j}")
+        logger.debug(f"Size of background corpus: {alpha_zero}")
 
-        for w in set(self.y_i.keys()).union(self.y_j.keys()): # iterate through all words among two corpora
-            first_log = math.log((self.y_i.get(w, 0) + self.alpha.get(w, 0)) / (n_i + alpha_zero - self.y_i.get(w, 0) - self.alpha.get(w, 0)))
-            second_log = math.log((self.y_j.get(w, 0) + self.alpha.get(w, 0)) / (n_j + alpha_zero - self.y_j.get(w, 0) - self.alpha.get(w, 0)))
-            self.delta[w] = first_log - second_log
+        try:
+            for w in set(self.y_i) | set(self.y_j): # iterate through all words among two corpora
+                first_log = math.log10((self.y_i.get(w, 0) + self.alpha.get(w, 0)) / (n_i + alpha_zero - self.y_i.get(w, 0) - self.alpha.get(w, 0)))
+                second_log = math.log10((self.y_j.get(w, 0) + self.alpha.get(w, 0)) / (n_j + alpha_zero - self.y_j.get(w, 0) - self.alpha.get(w, 0)))
+                self.delta[w] = first_log - second_log
+        except ValueError as e:
+            logger.debug(f"Y-i of the word {w}:", self.y_i.get(w, 0))
+            logger.debug(f"alpha of the word {w}:", self.alpha.get(w, 0))
+            logger.debug(f"value:", (self.y_i.get(w, 0) + self.alpha.get(w, 0)) /
+                  (n_i + alpha_zero - self.y_i.get(w, 0) - self.alpha.get(w, 0)))
+            raise e
 
     def _compute_sigma_2(self):
         """ Compute estimated values of sigma squared
@@ -158,8 +168,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--filepath_corpus_i", type=str, required=True)
     parser.add_argument("--filepath_corpus_j", type=str, required=True)
-    parser.add_argument("--filepath_background_corpus",
-                        default=None, type=str, required=False)
+    parser.add_argument("--filepath_background_corpus", default=None, type=str, required=False)
+    parser.add_argument("--save_top_words", default=None, type=int, required=False)
     parser.add_argument("--log_level", default=None, type=str, required=False)
     args = parser.parse_args()
 
@@ -169,10 +179,10 @@ def main():
         logger.add(sys.stderr, level=args.log_level)
 
     # Read file into list of texts
-    df_corpus_i = pd.read_csv(args.filepath_corpus_i).head(1000)
+    df_corpus_i = pd.read_csv(args.filepath_corpus_i)
     corpus_i = [text.strip() for text in df_corpus_i["text"]]
     del df_corpus_i
-    df_corpus_j = pd.read_csv(args.filepath_corpus_j).head(1000)
+    df_corpus_j = pd.read_csv(args.filepath_corpus_j)
     corpus_j = [text.strip() for text in df_corpus_j["text"]]
     del df_corpus_j
     if args.filepath_background_corpus != None:
@@ -188,6 +198,19 @@ def main():
     log_odds_ratio = LogOddsRatio(
         corpus_i, corpus_j, corpus_bg, tokenizer=tweet_tokenizer)
 
+    # Save top words into a file
+    if args.save_top_words != None and args.save_top_words > 0:
+        if args.save_top_words > len(log_odds_ratio.z_scores):
+            raise ValueError("--save_top_words must be less than or equal to vocab size")
+        
+        logger.info(f"Saving top {args.save_top_words} words ranked by Z-score")
+        with open("top_words.txt", "w") as f:
+            i = 0
+            for k, v in log_odds_ratio.z_scores.items():
+                f.write(k+"\n")
+                i += 1
+                if i >= args.save_top_words:
+                    break
 
 if __name__ == "__main__":
     main()
